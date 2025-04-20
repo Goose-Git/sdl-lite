@@ -116,6 +116,10 @@ struct SDL_Window
 
     SDL_Window *prev;
     SDL_Window *next;
+
+	// Added by Greg D, so we can have child windows - we can pass in a parent window
+    // when we are creating windows.
+    SDL_Window *parent;
 };
 #define FULLSCREEN_VISIBLE(W) \
     (((W)->flags & SDL_WINDOW_FULLSCREEN) && \

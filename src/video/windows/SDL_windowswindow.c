@@ -20,6 +20,10 @@
 */
 #include "../../SDL_internal.h"
 
+#ifndef _WIN32_WINNT
+#define _WIN32_WINNT 0x0600
+#endif
+
 #if SDL_VIDEO_DRIVER_WINDOWS
 
 #include "../../core/windows/SDL_windows.h"
@@ -40,6 +44,10 @@
 
 /* This is included after SDL_windowsvideo.h, which includes windows.h */
 #include "SDL_syswm.h"
+
+// Added this to make it so we can have transparent OGL contexts
+#include <dwmapi.h>
+#pragma comment (lib, "dwmapi.lib")
 
 /* Windows CE compatibility */
 #ifndef SWP_NOCOPYBITS
@@ -70,7 +78,7 @@ static ATOM SDL_HelperWindowClass = 0;
 
 static DWORD
 GetWindowStyle(SDL_Window * window)
-{
+{ 
     DWORD style = 0;
 
     if (window->flags & SDL_WINDOW_FULLSCREEN) {
@@ -99,10 +107,14 @@ GetWindowStyle(SDL_Window * window)
             /* You can have a borderless resizable window, but Windows doesn't always draw it correctly,
                see https://bugzilla.libsdl.org/show_bug.cgi?id=4466
              */
+            /*
             if (!(window->flags & SDL_WINDOW_BORDERLESS) ||
                 SDL_GetHintBoolean("SDL_BORDERLESS_RESIZABLE_STYLE", SDL_FALSE)) {
                 style |= STYLE_RESIZABLE;
-            }
+            }*/
+
+            // This WONT draw properly in windows - so we will override this below if this is the case
+            style |= STYLE_RESIZABLE;
         }
 
         /* Need to set initialize minimize style, or when we call ShowWindow with WS_MINIMIZE it will activate a random window */
@@ -290,10 +302,25 @@ SetupWindowData(_THIS, SDL_Window * window, HWND hwnd, HWND parent, SDL_bool cre
             window->flags &= ~SDL_WINDOW_MINIMIZED;
         }
     }
-    if (GetFocus() == hwnd) {
+
+	/*
+    if (GetFocus() == hwnd) {		// This was new code? Might be better than below
         window->flags |= SDL_WINDOW_INPUT_FOCUS;
         SDL_SetKeyboardFocus(window);
         WIN_UpdateClipCursor(window);
+    }*/
+
+	if (GetFocus() == hwnd) {
+        window->flags |= SDL_WINDOW_INPUT_FOCUS;
+        SDL_SetKeyboardFocus(data->window);
+
+        if (window->flags & SDL_WINDOW_INPUT_GRABBED) {
+            RECT rect;
+            GetClientRect(hwnd, &rect);
+            ClientToScreen(hwnd, (LPPOINT) & rect);
+            ClientToScreen(hwnd, (LPPOINT) & rect + 1);
+            ClipCursor(&rect);
+        }
     }
 
     /* Enable multi-touch */
@@ -344,26 +371,46 @@ static void CleanupWindowData(_THIS, SDL_Window * window)
 int
 WIN_CreateWindow(_THIS, SDL_Window * window)
 {
-    HWND hwnd, parent = NULL;
+    HWND hwnd, parent = NULL;       
     DWORD style = STYLE_BASIC;
     int x, y;
     int w, h;
 
-    if (window->flags & SDL_WINDOW_SKIP_TASKBAR) {
-        parent = CreateWindow(SDL_Appname, TEXT(""), STYLE_BASIC, 0, 0, 32, 32, NULL, NULL, SDL_Instance, NULL);
-    }
-
     style |= GetWindowStyle(window);
 
+    // This was Added so we could pass a parent window in
+    if ( window->parent != NULL ){
+        SDL_SysWMinfo wmInfo;
+        SDL_VERSION(&wmInfo.version);
+        SDL_GetWindowWMInfo(window->parent, &wmInfo);
+        parent = wmInfo.info.win.window;
+    }
+
+    // =========================================
+    /*  There is a bug in SDL where if you have a Borderless resizable window it doesn't draw correctly, you see a weird
+        border flashing and drawing at the wrong time. This code below will override the style in this case to a style that
+        actually seems to work and do the same thing. */
+    /*  Update - this border drawing bug is fixed by handling WM_NCACTIVATE differently and telling it not to repaint the nonclient
+    *   area of the window - see SDL_windowsevents. So we dont need to have this code and things can stay original SDL for the moment.
+    /*
+    if ((window->flags & (SDL_WINDOW_RESIZABLE | SDL_WINDOW_BORDERLESS)) == (SDL_WINDOW_RESIZABLE | SDL_WINDOW_BORDERLESS)) {
+        // Taken from:
+        // https://github.com/melak47/BorderlessWindow/blob/master/BorderlessWindow/src/BorderlessWindow.cpp
+        // Borderless aero style
+        window->flags = SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE;
+        //style = WS_POPUP | WS_THICKFRAME | WS_CAPTION | WS_SYSMENU | WS_MAXIMIZEBOX | WS_MINIMIZEBOX;
+        style = WS_POPUP | WS_THICKFRAME;
+       
+        // =========================================
+    }  */
+   
     /* Figure out what the window area will be */
     WIN_AdjustWindowRectWithStyle(window, style, FALSE, &x, &y, &w, &h, SDL_FALSE);
 
-    hwnd =
-        CreateWindow(SDL_Appname, TEXT(""), style, x, y, w, h, parent, NULL,
-                     SDL_Instance, NULL);
-    if (!hwnd) {
+    hwnd = CreateWindow(SDL_Appname, TEXT(""), style, x, y, w, h, parent, NULL, SDL_Instance, NULL);
+
+    if (!hwnd)
         return WIN_SetError("Couldn't create window");
-    }
 
     WIN_PumpEvents(_this);
 
@@ -401,7 +448,7 @@ WIN_CreateWindow(_THIS, SDL_Window * window)
         return 0;
 #else
         return SDL_SetError("Could not create GLES window surface (EGL support not configured)");
-#endif /* SDL_VIDEO_OPENGL_EGL */
+#endif /* SDL_VIDEO_OPENGL_EGL */ 
     }
 #endif /* SDL_VIDEO_OPENGL_ES2 */
 
@@ -413,6 +460,18 @@ WIN_CreateWindow(_THIS, SDL_Window * window)
 #else
     return SDL_SetError("Could not create GL window (WGL support not configured)");
 #endif
+
+	// This makes it to the OGL context can be transparent - so you can actually see through OGL if you clear the
+    // alpha to zero. This probably wouldnt work in Windows XP
+    // Thanks to:
+    // https://stackoverflow.com/questions/4052940/how-to-make-an-opengl-rendering-context-with-transparent-background
+    DWM_BLURBEHIND bb = { 0 };
+    HRGN hRgn = CreateRectRgn(0, 0, -1, -1);
+    bb.dwFlags = DWM_BB_ENABLE | DWM_BB_BLURREGION;
+    bb.hRgnBlur = hRgn;
+    bb.fEnable = TRUE;
+    DwmEnableBlurBehindWindow(hwnd, &bb);
+
 
     return 0;
 }

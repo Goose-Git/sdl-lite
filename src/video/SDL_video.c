@@ -1478,6 +1478,11 @@ SDL_FinishWindowCreation(SDL_Window *window, Uint32 flags)
     }
 }
 
+SDL_Window* g_parentWnd = NULL;
+void SDL_PreSetParentWindow( SDL_Window* parentWnd ){
+    g_parentWnd = parentWnd;
+}
+
 SDL_Window *
 SDL_CreateWindow(const char *title, int x, int y, int w, int h, Uint32 flags)
 {
@@ -1654,6 +1659,9 @@ SDL_CreateWindow(const char *title, int x, int y, int w, int h, Uint32 flags)
     }
     _this->windows = window;
 
+	// =================================================================
+    // This calls the WIN_CreateWindow for specific windows
+    // =================================================================
     if (_this->CreateSDLWindow && _this->CreateSDLWindow(_this, window) < 0) {
         SDL_DestroyWindow(window);
         return NULL;

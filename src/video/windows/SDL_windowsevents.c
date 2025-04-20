@@ -689,6 +689,21 @@ WIN_WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
                the global foreground window changes to and from this window. */
             WIN_UpdateFocus(data->window, !!wParam);
             WIN_CheckICMProfileChanged(data->window);
+
+			// NOTE: the above code is not in our original but I left it in.
+
+			// Greg Denness
+            // -----------
+            // white window Frame Drawing bug fix
+            // We added this to combat the wierd bug where frames are being re-drawn as solid white borders... I think this
+            // makes it so that non-client areas of windows are never deactivated.
+            // First param is if it's active or inactive.
+            // Second param - if this parameter is set to -1, DefWindowProc does not repaint the nonclient area to reflect the state change.
+            //
+            // It's possible that we only want to do this for borderless windows as this might screw up normal looking windows so
+            // we can probably check the window style at this point if needs be and not do this?
+            int returnvalue = DefWindowProc(hwnd, WM_NCACTIVATE, 0, -1);
+            return returnvalue;
         }
         break;
 
@@ -1369,6 +1384,11 @@ WIN_WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 
     case WM_NCHITTEST:
         {
+			/** This is used to tell the window where the mouse is in relation to being able to resize, like
+                is the mouse over the left side of the window frame? return LEFT, this will then make the mouse
+                cursor show the correct thing.
+                This is done via a callback set in the window class.
+                 */
             SDL_Window *window = data->window;
             if (window->hit_test) {
                 POINT winpoint;
@@ -1633,6 +1653,7 @@ SDL_RegisterApp(const char *name, Uint32 style, void *hInst)
     wcex.lpszMenuName   = NULL;
     wcex.lpszClassName  = SDL_Appname;
     wcex.style          = SDL_Appstyle;
+   // wcex.hbrBackground  = (HBRUSH)GetStockObject(GRAY_BRUSH);
     wcex.hbrBackground  = NULL;
     wcex.lpfnWndProc    = WIN_WindowProc;
     wcex.hInstance      = SDL_Instance;

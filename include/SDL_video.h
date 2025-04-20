@@ -739,6 +739,10 @@ extern DECLSPEC SDL_Window * SDLCALL SDL_CreateWindow(const char *title,
                                                       int x, int y, int w,
                                                       int h, Uint32 flags);
 
+// Greg Added this - so we can set a parent window and create child windows - I couldnt make it pass directly
+// to SDL_CreateWindow, so I added this extra function
+extern DECLSPEC void SDL_PreSetParentWindow( SDL_Window* parentWnd );
+
 /**
  * Create an SDL window from an existing native window.
  *
